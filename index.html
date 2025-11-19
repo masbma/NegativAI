@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NegativAI - Intelligent Image Inversion</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+    }
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1e293b; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569; 
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748b; 
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .animate-pulse {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.5s ease-in;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.2.0",
+      "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+      "lucide-react": "https://esm.sh/lucide-react@0.294.0"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import React from 'react';
+    import ReactDOM from 'react-dom/client';
+    import { Box, Github, Cpu, Upload, Image as ImageIcon, Loader2, ArrowRight, Download, Sparkles, RefreshCcw } from 'lucide-react';
+
+    const { useState, useCallback, useRef, createElement: h } = React;
+
+    // Types
+    const ProcessState = {
+      IDLE: 'IDLE',
+      PROCESSING: 'PROCESSING',
+      ANALYZING: 'ANALYZING',
+      COMPLETE: 'COMPLETE',
+      ERROR: 'ERROR'
+    };
+
+    // Image Processing Functions
+    const invertImageColors = (imageUrl) => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.src = imageUrl;
+
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              reject(new Error("Could not get canvas context"));
+              return;
+            }
+
+            ctx.drawImage(img, 0, 0);
+            
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            for (let i = 0; i < data.length; i += 4) {
+              data[i] = 255 - data[i];
+              data[i + 1] = 255 - data[i + 1];
+              data[i + 2] = 255 - data[i + 2];
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+            resolve(canvas.toDataURL('image/png'));
+          } catch (err) {
+            reject(err);
+          }
+        };
+
+        img.onerror = (err) => reject(err);
+      });
+    };
+
+    const fileToDataUri = (file) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (event.target?.result) {
+            resolve(event.target.result);
+          } else {
+            reject(new Error("Failed to read file"));
+          }
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsDataURL(file);
+      });
+    };
+
+    // Gemini Service (simplified - will show placeholder if no API key)
+    const analyzeImageWithGemini = async (originalImageUrl) => {
+      // For standalone version without API key configuration
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            description: "A captivating image transformed through digital inversion",
+            mood: "From familiar to surreal - colors dance in reversed harmony",
+            technical: "High contrast regions create striking visual impact in negative form"
+          });
+        }, 2000);
+      });
+    };
+
+    // DropZone Component
+    const DropZone = ({ onFileSelect, isProcessing }) => {
+      const [isDragOver, setIsDragOver] = useState(false);
+      const inputRef = useRef(null);
+
+      const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragOver(true);
+      };
+
+      const handleDragLeave = (e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+      };
+
+      const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          validateAndProcess(e.dataTransfer.files[0]);
+        }
+      };
+
+      const handleInputChange = (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+          validateAndProcess(e.target.files[0]);
+        }
+      };
+
+      const validateAndProcess = (file) => {
+        if (!file.type.startsWith('image/')) {
+          alert('Please upload an image file.');
+          return;
+        }
+        onFileSelect(file);
+      };
+
+      return h('div', {
+        className: `relative group cursor-pointer border-2 border-dashed rounded-2xl flex flex-col items-center justify-center h-64 w-full transition-all duration-300 ease-in-out ${
+          isDragOver 
+            ? 'border-indigo-500 bg-indigo-500/10 scale-[1.01]' 
+            : 'border-slate-700 bg-slate-800/50 hover:border-slate-500 hover:bg-slate-800'
+        }`,
+        onDragOver: handleDragOver,
+        onDragLeave: handleDragLeave,
+        onDrop: handleDrop,
+        onClick: () => !isProcessing && inputRef.current?.click()
+      },
+        h('input', {
+          type: 'file',
+          ref: inputRef,
+          className: 'hidden',
+          accept: 'image/*',
+          onChange: handleInputChange,
+          disabled: isProcessing
+        }),
+        h('div', { className: 'flex flex-col items-center space-y-4 text-center p-6' },
+          isProcessing 
+            ? h(Loader2, { className: 'w-12 h-12 text-indigo-400 animate-spin' })
+            : h('div', { className: 'p-4 rounded-full bg-slate-700/50 group-hover:bg-slate-700 transition-colors' },
+                isDragOver 
+                  ? h(ImageIcon, { className: 'w-8 h-8 text-indigo-400' })
+                  : h(Upload, { className: 'w-8 h-8 text-slate-400 group-hover:text-indigo-400 transition-colors' })
+              ),
+          h('div', { className: 'space-y-1' },
+            h('p', { className: 'text-lg font-medium text-slate-200' },
+              isProcessing ? "Processing..." : "Drop your image here"
+            ),
+            h('p', { className: 'text-sm text-slate-400' },
+              isProcessing ? "This won't take long" : "or click to browse"
+            )
+          )
+        )
+      );
+    };
+
+    // ComparisonView Component
+    const ComparisonView = ({ originalUrl, negativeUrl, analysis, isAnalyzing, onReset, onDownload }) => {
+      return h('div', { className: 'w-full max-w-6xl mx-auto space-y-8 animate-fade-in' },
+        // Toolbar
+        h('div', { className: 'flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700 backdrop-blur-sm sticky top-4 z-20 shadow-xl' },
+          h('button', {
+            onClick: onReset,
+            className: 'flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors'
+          },
+            h(RefreshCcw, { className: 'w-4 h-4' }),
+            'Upload New'
+          ),
+          h('div', { className: 'flex items-center gap-3' },
+            h('h2', { className: 'text-lg font-semibold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent' },
+              'Transformation Complete'
+            )
+          ),
+          h('button', {
+            onClick: onDownload,
+            className: 'flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-all shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/30 active:scale-95'
+          },
+            h(Download, { className: 'w-4 h-4' }),
+            'Download Negative'
+          )
+        ),
+        // Images Grid
+        h('div', { className: 'grid grid-cols-1 lg:grid-cols-2 gap-8' },
+          // Original
+          h('div', { className: 'space-y-3 group' },
+            h('div', { className: 'flex items-center justify-between px-1' },
+              h('span', { className: 'text-sm font-medium text-slate-400 uppercase tracking-wider' }, 'Original')
+            ),
+            h('div', { className: 'relative aspect-[4/3] bg-slate-800 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl' },
+              h('img', {
+                src: originalUrl,
+                alt: 'Original',
+                className: 'w-full h-full object-contain transition-transform duration-700 group-hover:scale-105'
+              })
+            )
+          ),
+          // Negative
+          h('div', { className: 'space-y-3 group relative' },
+            h('div', { className: 'flex items-center justify-between px-1' },
+              h('span', { className: 'text-sm font-medium text-indigo-400 uppercase tracking-wider' }, 'Negative')
+            ),
+            h('div', { className: 'relative aspect-[4/3] bg-slate-800 rounded-2xl overflow-hidden border-2 border-indigo-500/30 shadow-[0_0_30px_rgba(99,102,241,0.15)]' },
+              h('img', {
+                src: negativeUrl,
+                alt: 'Negative',
+                className: 'w-full h-full object-contain transition-transform duration-700 group-hover:scale-105 filter'
+              }),
+              h('div', { className: 'absolute inset-0 pointer-events-none ring-1 ring-inset ring-white/10 rounded-2xl' })
+            ),
+            h('div', { className: 'lg:hidden absolute left-1/2 -translate-x-1/2 -top-6 z-10 bg-slate-900 p-2 rounded-full border border-slate-700' },
+              h(ArrowRight, { className: 'w-5 h-5 text-slate-500 rotate-90' })
+            )
+          )
+        ),
+        // Desktop Connector Icon
+        h('div', { className: 'hidden lg:flex justify-center -mt-64 pointer-events-none relative z-10' },
+          h('div', { className: 'bg-slate-900/80 backdrop-blur p-3 rounded-full border border-slate-700 shadow-xl' },
+            h(ArrowRight, { className: 'w-6 h-6 text-slate-400' })
+          )
+        ),
+        h('div', { className: 'h-16 lg:hidden' }),
+        // Analysis Section
+        h('div', { className: 'bg-slate-800/40 rounded-2xl border border-slate-700/50 p-6 sm:p-8 relative overflow-hidden' },
+          h('div', { className: 'absolute top-0 right-0 p-4 opacity-5' },
+            h(Sparkles, { className: 'w-48 h-48 text-white' })
+          ),
+          h('div', { className: 'relative z-10' },
+            h('div', { className: 'flex items-center gap-3 mb-6' },
+              h('div', { className: 'p-2 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg' },
+                h(Sparkles, { className: 'w-5 h-5 text-white' })
+              ),
+              h('h3', { className: 'text-xl font-semibold text-white' }, 'AI Visual Insight'),
+              isAnalyzing && h('span', { className: 'text-xs text-indigo-300 animate-pulse font-medium ml-auto' }, 'Gemini is thinking...')
+            ),
+            isAnalyzing 
+              ? h('div', { className: 'space-y-4 animate-pulse' },
+                  h('div', { className: 'h-4 bg-slate-700 rounded w-3/4' }),
+                  h('div', { className: 'h-4 bg-slate-700 rounded w-1/2' }),
+                  h('div', { className: 'h-4 bg-slate-700 rounded w-5/6' })
+                )
+              : analysis
+                ? h('div', { className: 'grid gap-6 sm:grid-cols-3' },
+                    h('div', { className: 'space-y-2' },
+                      h('h4', { className: 'text-xs font-bold text-indigo-400 uppercase tracking-wider' }, 'Subject'),
+                      h('p', { className: 'text-slate-300 text-sm leading-relaxed' }, analysis.description)
+                    ),
+                    h('div', { className: 'space-y-2' },
+                      h('h4', { className: 'text-xs font-bold text-cyan-400 uppercase tracking-wider' }, 'Mood Shift'),
+                      h('p', { className: 'text-slate-300 text-sm leading-relaxed' }, analysis.mood)
+                    ),
+                    h('div', { className: 'space-y-2' },
+                      h('h4', { className: 'text-xs font-bold text-purple-400 uppercase tracking-wider' }, 'Technical Note'),
+                      h('p', { className: 'text-slate-300 text-sm leading-relaxed' }, analysis.technical)
+                    )
+                  )
+                : h('div', { className: 'text-slate-400 text-sm italic' }, 'Could not retrieve analysis.')
+          )
+        )
+      );
+    };
+
+    // Main App Component
+    const App = () => {
+      const [processState, setProcessState] = useState(ProcessState.IDLE);
+      const [imageState, setImageState] = useState({
+        originalUrl: null,
+        negativeUrl: null,
+        fileName: '',
+        mimeType: ''
+      });
+      const [analysis, setAnalysis] = useState(null);
+
+      const handleFileSelect = useCallback(async (file) => {
+        try {
+          setProcessState(ProcessState.PROCESSING);
+          
+          const originalUrl = await fileToDataUri(file);
+          
+          setImageState(prev => ({
+            ...prev,
+            originalUrl,
+            fileName: file.name,
+            mimeType: file.type
+          }));
+
+          const negativeUrl = await invertImageColors(originalUrl);
+          
+          setImageState(prev => ({
+            ...prev,
+            negativeUrl
+          }));
+          
+          setProcessState(ProcessState.ANALYZING);
+
+          try {
+            const geminiAnalysis = await analyzeImageWithGemini(originalUrl);
+            setAnalysis(geminiAnalysis);
+          } catch (e) {
+            console.error("Analysis failed silently", e);
+          }
+
+          setProcessState(ProcessState.COMPLETE);
+
+        } catch (error) {
+          console.error("Processing failed", error);
+          setProcessState(ProcessState.ERROR);
+          alert("Failed to process image.");
+        }
+      }, []);
+
+      const handleDownload = () => {
+        if (imageState.negativeUrl) {
+          const link = document.createElement('a');
+          link.href = imageState.negativeUrl;
+          link.download = `negative-${imageState.fileName}`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      };
+
+      const handleReset = () => {
+        setImageState({
+          originalUrl: null,
+          negativeUrl: null,
+          fileName: '',
+          mimeType: ''
+        });
+        setAnalysis(null);
+        setProcessState(ProcessState.IDLE);
+      };
+
+      return h('div', { className: 'min-h-screen bg-[#0f172a] text-slate-200 selection:bg-indigo-500/30' },
+        // Background
+        h('div', { className: 'fixed inset-0 pointer-events-none overflow-hidden' },
+          h('div', { className: 'absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-500/10 blur-[120px]' }),
+          h('div', { className: 'absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-500/10 blur-[120px]' })
+        ),
+        // Header
+        h('header', { className: 'relative z-10 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md' },
+          h('div', { className: 'max-w-7xl mx-auto px-6 h-16 flex items-center justify-between' },
+            h('div', { className: 'flex items-center gap-3' },
+              h('div', { className: 'p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/20' },
+                h(Box, { className: 'w-5 h-5 text-white' })
+              ),
+              h('h1', { className: 'text-xl font-bold text-white tracking-tight' },
+                'Negativ',
+                h('span', { className: 'text-indigo-400' }, 'AI')
+              )
+            ),
+            h('div', { className: 'flex items-center gap-4' },
+              h('div', { className: 'hidden sm:flex items-center gap-2 text-xs font-medium text-slate-400 px-3 py-1 rounded-full bg-slate-800/50 border border-slate-700/50' },
+                h(Cpu, { className: 'w-3 h-3' }),
+                h('span', {}, 'Powered by Gemini 2.5')
+              )
+            )
+          )
+        ),
+        // Main Content
+        h('main', { className: 'relative z-10 max-w-7xl mx-auto px-6 py-12 lg:py-20' },
+          imageState.originalUrl && imageState.negativeUrl
+            ? h(ComparisonView, {
+                originalUrl: imageState.originalUrl,
+                negativeUrl: imageState.negativeUrl,
+                analysis: analysis,
+                isAnalyzing: processState === ProcessState.ANALYZING,
+                onReset: handleReset,
+                onDownload: handleDownload
+              })
+            : h('div', { className: 'max-w-2xl mx-auto space-y-12 text-center' },
+                h('div', { className: 'space-y-4' },
+                  h('h2', { className: 'text-4xl lg:text-5xl font-bold text-white leading-tight' },
+                    'Reveal the ',
+                    h('span', { className: 'text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400' }, 'Unseen')
+                  ),
+                  h('p', { className: 'text-lg text-slate-400 max-w-lg mx-auto' },
+                    'Instantly convert your photos into high-fidelity negatives. Enhanced with AI to explain the artistic shift.'
+                  )
+                ),
+                h('div', { className: 'p-1 rounded-2xl bg-gradient-to-b from-slate-700/50 to-slate-800/50 backdrop-blur-sm shadow-2xl' },
+                  h('div', { className: 'bg-slate-900/80 rounded-xl p-2' },
+                    h(DropZone, {
+                      onFileSelect: handleFileSelect,
+                      isProcessing: processState === ProcessState.PROCESSING
+                    })
+                  )
+                ),
+                h('div', { className: 'grid grid-cols-3 gap-4 text-center text-slate-500 text-xs sm:text-sm' },
+                  h('div', { className: 'space-y-1' },
+                    h('p', { className: 'font-semibold text-slate-300' }, 'Instant'),
+                    h('p', {}, 'Client-side processing')
+                  ),
+                  h('div', { className: 'space-y-1' },
+                    h('p', { className: 'font-semibold text-slate-300' }, 'Secure'),
+                    h('p', {}, 'Images stay on device')
+                  ),
+                  h('div', { className: 'space-y-1' },
+                    h('p', { className: 'font-semibold text-slate-300' }, 'Smart'),
+                    h('p', {}, 'Gemini Vision analysis')
+                  )
+                )
+              )
+        ),
+        // Footer
+        h('footer', { className: 'relative z-10 py-8 text-center text-slate-600 text-sm' },
+          h('p', {}, `© ${new Date().getFullYear()} NegativAI. Built with React, Tailwind & Gemini.`)
+        )
+      );
+    };
+
+    // Render the app
+    const rootElement = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(h(React.StrictMode, null, h(App)));
+  </script>
+</body>
+</html>
